@@ -1,0 +1,124 @@
+#!/bin/bash
+
+# Do not change this path
+PATH=/bin:/usr/bin:/sbin:/usr/sbin
+
+function do_status {
+    screen -ls | grep [.]GAMESERVER[[:space:]] > /dev/null
+}
+
+function do_stop {
+    #make sure we ain't tying to stop something that ain't running.
+    if ! do_status; then echo "$INSTANCE_PORT could not be found. Probaly not running."; exit 1; fi
+    
+    screen -r $(screen -ls | awk -F . "/\.GAMESERVER\t/ {print $1}" | awk '{print $1}') -X quit
+}
+
+function do_update {
+  if do_status
+  then
+    echo "Stopping running instance..."
+    do_stop
+    sleep 5
+  fi
+
+  cd /srv/steamcmd
+
+  ./steamcmd.sh +login anonymous +force_install_dir /srv/server +app_update 740 validate +quit
+  
+  sed -i 's/Rank/\/\/Rank/g' /srv/server/csgo/botprofile.db
+  
+  exit 1
+}
+
+function do_start {
+    SYSTEM_ADDR=$(ip -4 address show eth0 | grep 'inet' | sed 's/.*inet \([0-9\.]\+\).*/\1/')
+
+    cd /srv/server
+
+    screen -AmdS GAMESERVER ./srcds_run -game csgo -console -condebug -tickrate 128 -usercon -secure -nowatchdog -maxplayers_override 12 +ip $SYSTEM_ADDR +sv_hibernate_when_empty 0 +hostport 27015 +game_type 0 +game_mode 1 +tv_port 27016 +tv_enable 1
+    
+    #chmod 777 /dev/pts/*
+    #./srcds_run -game csgo -console -condebug -tickrate 128 -usercon -secure -nowatchdog -maxplayers_override 12 +ip $SYSTEM_ADDR +sv_hibernate_when_empty 0 +hostport 27015 +game_type 0 +game_mode 1 +tv_port 27016 +tv_enable 1
+}
+
+function do_console {
+  if ! do_status; then echo "$SCREEN_NAME could not be found. Probably not running."; exit 1; fi
+
+  screen -r $(screen -ls | awk -F . "/\.GAMESERVER\t/ {print $1}" | awk '{print $1}')
+}
+
+function do_usage {
+  echo "Usage: $0 {start|stop|status|restart|console|update}"
+  echo "On console, press CTRL+A then D to stop the screen without stopping the server."
+}
+
+
+
+if [[ `whoami` = 'gameuser' ]]
+then
+  case "$1" in
+    start)
+      if do_status
+      then
+        echo "Server is allready running..."
+      else
+        do_start
+      fi
+      ;;
+    stop)
+      if do_status
+      then
+        do_stop
+      else
+        echo "Server is not running..."
+      fi
+      ;;
+    restart)
+      if do_status
+      then
+        echo "Shutting down server"
+        do_stop
+        sleep 5
+
+        echo "Starting up server"
+        do_start
+        
+        if do_status
+        then
+          echo "Server was startet successfully."
+        fi
+      else
+        echo "Server is not running..."
+      fi
+      ;;
+    status)
+      if do_status
+      then echo "Server is UP"
+      else echo "Server is DOWN"
+      fi
+      ;;
+    update)
+      if do_status
+      then
+        echo "Shutting down server"
+        do_stop
+      fi
+      
+      do_update
+      ;;
+    console)
+      if do_status
+      then
+        do_console
+      fi
+      ;;
+    *)
+      do_usage
+    ;;
+  esac
+else
+  echo "Please run command as gameuser"
+fi
+
+exit 0
