@@ -1,0 +1,279 @@
+#!/bin/bash
+
+# Do not change this path
+PATH=/bin:/usr/bin:/sbin:/usr/sbin
+GAMEFILE="/srv/game.settings"
+aGames=('css' 'csgo' 'mc' 'tmnf')
+sGame=""
+function fPrepare {
+  mkdir /srv/steamcmd/
+  cd /srv/steamcmd/
+  wget "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz"
+  tar -xvzf steamcmd_linux.tar.gz
+  rm steamcmd_linux.tar.gz
+
+  /srv/steamcmd/steamcmd.sh +quit
+  echo "csgo" > /srv/game.settings
+  touch /srv/steamcmd/update.log   
+  chown -r gameuser:gameuser /srv
+}
+
+function fInstall {
+  case "$1" in
+    csgo)
+      /srv/steamcmd/steamcmd.sh +login anonymous +force_install_dir /srv/csgo +app_update 740 validate +quit
+      ;;
+    css)
+      /srv/steamcmd/steamcmd.sh +login anonymous +force_install_dir /srv/css +app_update 232330 validate +quit
+      ;;
+  esac
+}
+
+function fSetGame {
+  for i in "${aGames[@]}"
+  do
+    if [[ "$i" = "$1" ]] ; then
+      echo "${1}" > /srv/game.settings
+    fi
+  done
+}
+
+function fGetGame {
+  tmpGame=`cat /srv/game.settings`
+  
+  for i in "${aGames[@]}"
+  do
+    if [[ "$i" = "$tmpGame" ]] ; then
+      sGame="$tmpGame"
+    fi
+  done
+}
+
+function fStatus {
+    screen -ls | grep [.]GAMESERVER[[:space:]] > /dev/null
+}
+
+function fStopScreen {
+  #make sure we ain't tying to stop something that ain't running.
+  if ![[ fStatus ]] ; then echo "Instance is not running."; exit 1; fi
+
+  case "$sGame" in
+    mc)
+      screen -r $(screen -ls | awk -F . "/\.GAMESERVER\t/ {print $1}" | awk '{print $1}') -X stuff "stop$(printf \\r)"
+    ;; 
+    *)
+      screen -r $(screen -ls | awk -F . "/\.GAMESERVER\t/ {print $1}" | awk '{print $1}') -X quit
+    ;;
+  esac
+}
+
+function fStartScreen {
+  set -o noglob;
+  SYSTEM_ADDR=`ip -4 address show eth0 | grep 'inet' | sed -e 's/.*inet \([0-9\.]+\).*/\1/'`;
+  set +o noglob;
+
+  case "$sGame" in
+    csgo)
+      cd /srv/csgo
+	export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:.:bin:/srv/
+      screen -AmdS GAMESERVER ./srcds_run -game csgo -console -condebug -tickrate 128 -usercon -secure -nowatchdog -maxplayers_override 12 +ip "$SYSTEM_ADDR" +sv_hibernate_when_empty 0 +hostport 27015 +game_type 0 +game_mode 1 +tv_port 27016 +tv_enable 1
+      ;;
+    css)
+      cd /srv/css
+      screen -AmdS GAMESERVER ./srcds_run -game cstrike -console -secure -tickrate 100 +fps_max 600 -maxplayers 12 -ip "$SYSTEM_ADDR" -port 27015 +map de_dust2 -nohltv -tvdisable
+      ;;
+    cs)
+      cd /srv/cs
+      screen -AmdS GAMESERVER ./hlds_run -game cstrike -nomaster -noipx -maxplayers 12 -sys_tickrate 10000 +ip "$SYSTEM_ADDR" -port 27015 -pingboost 2
+      ;;
+    mc)
+      cd /srv/mc
+      screen -AmdS GAMESERVER java -Xmn256M -Xmx16384M -Xms1024M -XX:PermSize=64m -jar spigot.jar nogui
+      ;;
+    tmnf)
+      fTMNFStart
+      ;;
+  esac
+}
+
+function fOpenConsole {
+  if [[ ! fStatus ]]; then echo "Unable to locate server screen."; exit 1; fi
+
+  screen -r "$(screen -ls | awk -F . "/\.GAMESERVER\t/ {print $1}" | awk '{print $1}')"
+}
+
+function fUpdateGame {
+  #check if call is a retry.
+  if [[ -z "$1" ]]; then uGame="$sGame"; else retry="$1"; fi
+  
+  #check if call is a retry.
+  if [[ -z "$2" ]]; then retry=0; else retry="$2"; fi
+  
+  #Make sure there is no instances running.
+  if [[ fStatus ]]
+  then
+    fStopScreen
+  fi
+  
+  case "$uGame"  in
+    csgo)
+      /srv/steamcmd/steamcmd.sh +login anonymous +force_install_dir /srv/csgo +app_update 740 -beta sep_03 validate +quit 2>&1 | tee /srv/steamcmd/update.log
+      sed -i 's/Rank/\/\/Rank/g' /srv/csgo/csgo/botprofile.db
+      ;;
+    css)
+      /srv/steamcmd/steamcmd.sh +login anonymous +force_install_dir /srv/css +app_update 232330 validate +quit 2>&1 | tee /srv/steamcmd/update.log
+      ;;
+    cs)
+      /srv/steamcmd/steamcmd.sh +login anonymous +force_install_dir /srv/cs +app_update 90 validate +quit 2>&1 | tee /srv/steamcmd/update.log
+      ;;
+  esac
+  
+  if [[ `egrep -ic "Success! App .*\." /srv/steamcmd/update.log` -gt 0 ]]
+  then
+    echo "Instance updated successfully"
+  else
+    if [[ "$retry" -lt 3 ]]
+    then
+      retry=`expr "$retry" + 1`
+      echo "Instance update failed... retry $retry/3..."
+      fUpdateGame "$uGame" "$retry"
+    else
+      echo "Instance update failed... exit..."
+      exit 1
+    fi
+  fi
+  
+  exit 1
+}
+
+function fTMNFStart {
+  fTMNFFindEvents
+  exit 1
+}
+
+
+function fTMNFFindEvents {
+  DirectoryPath="/srv/tmn/GameData/Tracks/MatchSettings/"
+  options="`find "$DirectoryPath" -maxdepth 1 -mindepth 1 -type d | sort -d`"
+# options="`find "$DirectoryPath" -maxdepth 1 -type d -print0 | xargs -r0 | sort`"
+# -maxdepth 1 -mindepth 1 -type d | sort -d
+
+  PS3="Vælg event: "
+  select REPLY in "Quit" ${options[@]} ; do
+      if [[ "$REPLY" = "Quit" ]] ; then
+          exit;
+      else
+          break;
+      fi
+  done
+  
+  fTMNFFindRounds "$REPLY"
+}
+
+function fTMNFFindRounds {
+  set -o noglob
+  options="`find $1 -iname *.txt -type f | sort -d`"
+  set +o noglob
+
+  PS3="Vælg runde konfiguration: "
+  select REPLY in "Quit" ${options[@]} ; do
+      if [[ "$REPLY" = "Quit" ]] ; then
+          exit;
+      else
+          break;
+      fi
+  done 
+ 
+  fTMNFFindRoundTimes "$REPLY"
+}
+
+function fTMNFFindRoundTimes {
+  num_tracks=`xml_grep --count //challenge "$1" |grep total|cut -d' ' -f2`
+  roundtime=`xml_grep --text //timeattack_limit "$1"`
+  
+  totaltime="$((num_tracks * roundtime))"
+  timeinseconds="$((totaltime /  1000))"
+  timeinminutes="$((timeinseconds / 60))"
+
+  ## Med både opvarming og slutrundte, så behøver vi ikke give den sidste bane 5 minutter
+  timeinminutes="$((timeinminutes - 2))"
+  
+  fTMNFStartScreen "$1" "$timeinminutes"
+}
+
+function fTMNFStartScreen {
+  export TIMEOUT="$2"
+  
+  cd /srv/tmn
+  
+  screen -AmdSL GAMESERVER mono StartTrackmania.exe "$1" "$?"
+}
+
+function fUsage {
+  echo "Usage: $0 {start|stop|status|restart|console}"
+  echo "Usage: $0 set [game]"
+  echo "Usage: $0 update [game]"
+  echo "On console, press CTRL+A then D to stop the screen without stopping the server."
+}
+
+fGetGame
+
+case "$1" in
+  prepare)
+    if fStatus
+    then
+      fStopScreen
+      server prepare
+    else
+      fPrepare
+    fi
+  ;;
+    
+  start)
+    if fStatus
+    then
+      echo "Server is already running..."
+    else
+      fStartScreen
+    fi
+  ;;
+    
+  update)
+    fUpdateGame "$2"
+  ;;
+    
+  stop)
+    if fStatus
+    then
+      fStopScreen
+    else
+      echo "Server is not running..."
+    fi
+  ;;
+    
+  status)
+    if fStatus
+    then echo "Server is UP"
+    else echo "Server is DOWN"
+    fi
+  ;;
+  
+  console)
+    if fStatus
+    then
+      fOpenConsole
+    fi
+  ;;
+
+  install)
+    fInstall "$2"
+  ;;
+
+  set)
+    fSetGame "$2"
+  ;;
+  
+  *)
+    fUsage
+  ;;
+esac
