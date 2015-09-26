@@ -1,0 +1,2 @@
+USE_INETD=false
+OPTIONS="--bind-address 0.0.0.0 --tftpd-timeout 300 --retry-timeout 5 --maxthread 100 --verbose=6 /tftpboot"
