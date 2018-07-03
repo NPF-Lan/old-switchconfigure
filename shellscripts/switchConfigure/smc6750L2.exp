@@ -1,0 +1,60 @@
+#!/usr/bin/expect
+
+set switch_ip [lindex $argv 1]
+set switch_name [lindex $argv 0]
+set switch_subnet [lindex $argv 2]
+set switch_gw [lindex $argv 3]
+set switch_vlan [lindex $argv 4]
+
+set password "password\r"
+
+#spawn telnet $ip
+spawn screen -r
+
+send "\r"
+
+expect "*Password:" {
+	send "\r"
+}
+
+expect "*Press ENTER to start session" {
+	send "\r"
+}
+
+expect "*Username:" {
+	send "admin\r"
+	expect "*Password:" {
+		send "admin\r"
+	}
+}
+
+expect "*Username:" {
+	send "admin\r"
+	expect "*Password:" {
+		send "$password\r"
+	}
+}
+
+expect "Console#" {
+	send "config\r"
+	expect "config" {
+		expect "config" { send "username guest password 0 $password\r" }
+		expect "config" { send "username admin password 0 $password\r" }
+		expect "config" { send "hostname \"$switch_name\"\r" }
+		expect "config" { send "ip ssh server\r" }
+		expect "config" { send "ip ssh timeout 100\r" }
+		expect "config" { send "ip ssh authentication-retries 5\r" }
+
+		expect "config" { send "interface vlan 1\r" }
+		expect "config-if" { send "ip address $switch_ip $switch_subnet\r" }
+		expect "config-if" { send "exit\r" }
+
+		expect "config" { send "spanning-tree mode stp\r" }
+		expect "config" { send "no ip http server\r" }
+		expect "config" { send "boot system config: startup\r" } 
+		expect "config" { send "exit\r" }
+		expect "Console#" { send "exit\r" }
+	}
+}
+
+exit 0

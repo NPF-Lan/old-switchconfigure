@@ -1,0 +1,146 @@
+#!/usr/bin/expect
+
+## Dynamic Variables or Parameters
+set switch_ip [lindex $argv 1]
+set switch_name [lindex $argv 0]
+set switch_gw [lindex $argv 2]
+set switch_vlan [lindex $argv 3]
+
+
+## Static Variables
+set syslog_server "10.0.1.21"
+set ntp_server "10.255.200.1"
+set snmp_trap_receiver "10.0.1.21"
+
+set switch_password [subst -nocommands -novariables {$cisco$encryptedpassword$} ]
+
+set password "password\r"
+
+spawn screen -r
+
+send "\r"
+sleep 1
+send "\r"
+sleep 1
+send "\r"
+expect "Would you like to enter the initial configuration dialog?" {
+	send "no\r"
+}
+
+send "\r"
+sleep 1
+send "\r"
+
+expect ">" {
+	send "enable\r"
+
+	expect "Password:" { send "$password\r" }
+
+	expect "#" { send "conf t\r" }
+	expect "config" { send "line con 0\r" }
+	expect "config-line" { send "logging syn\r" }
+	expect "config-line" { send "exit\r" }
+	expect "config" { send "exit\r" }
+
+
+	expect "#" { send "conf t\r" }
+	expect "config" { send "no ip domain-lookup\r" }
+	expect "config" { send "banner login \"NPF ACCESS SWITCH: $switch_name\"\r" }
+	expect "config" { send "service timestamps debug datetime localtime\r" }
+	expect "config" { send "service timestamps log datetime localtime\r" }
+	expect "config" { send "service password-encryption\r" }
+	expect "config" { send "clock timezone CET 1\r" }
+	expect "config" { send "clock summer-time CET recurring last Sun Mar 2:00 last Sun Oct 3:00\r" }
+	expect "config" { send "aaa new-model\r" }
+	expect "config" { send "enable secret 5 $switch_password\r" }
+	expect "config" { send "username admin privilege 15 secret 5 $switch_password\r" }
+	expect "config" { send "ip domain-name sw.npf\r" }
+	expect "config" { send "ip ssh version 2\r" }
+	expect "config" { send "crypto key generate rsa\r"
+		expect "replace them" { send "yes\r" }
+		expect "How many bits in the modulus" { send "1024\r"
+		set timeout 20
+			}
+		}
+	expect "config" { send "crypto key generate rsa mod 1024\r" }
+	expect "config" { send "vtp mode transparent\r" }
+	expect "config" { send "spanning-tree portfast default\r" }
+	expect "config" { send "spanning-tree portfast bpduguard default\r" }
+	expect "config" { send "spanning-tree mode rapid-pvst\r" }
+	expect "config" { send "errdisable recovery cause all\r" }
+	expect "config" { send "no ip http server\r" }
+	expect "config" { send "hostname $switch_name\r" }
+	expect "config" { send "no ip dhcp snooping\r" }
+	
+	expect "config" { send "vlan $switch_vlan\r" }
+	expect "config-vlan" { send "name ACCESS\r" }
+	expect "config-vlan" { send "vlan 193\r" }
+	expect "config-vlan" { send "name MGMT\r" }
+	expect "config-vlan" { send "vlan 194\r" }
+	expect "config-vlan" { send "name CONFIG-VLAN\r" }
+	
+	expect "config-vlan" { send "int range fa0/1 -24\r" }
+	expect "config-if-range" { send "no cdp enable\r" }
+	expect "config-if-range" { send "switchport access vlan $switch_vlan\r" }
+	expect "config-if-range" { send "switchport mode access\r" }
+	expect "config-if-range" { send "no logging event link-status\r" }
+	expect "config-if-range" { send "switchport port-security maximum 3\r" }
+	expect "config-if-range" { send "switchport port-security violation restrict\r" }
+	expect "config-if-range" { send "switchport port-security\r" }
+	expect "config-if-range" { send "spanning-tree bpduguard enable\r" }
+	expect "config-if-range" { send "spanning-tree portfast\r" }
+	expect "config-if-range" { send "no shutdown\r" }
+	
+	expect "config-if-range" { send "int ra gi0/1 -2\r" }
+	expect "config-if-range" { send "ip dhcp snooping trust\r" }
+	expect "config-if-range" { send "switchport mode trunk\r" }
+	expect "config-if-range" { send "switchport trunk native vlan $switch_vlan\r" }
+	expect "config-if-range" { send "switchport nonegotiate\r" }
+	expect "config-if-range" { send "no shutdown\r" }
+
+	expect "config-if-range" { send "int vl 193\r" }
+	expect "config-if" { send "ip add $switch_ip 255.255.255.0\r" }
+	expect "config-if" { send "no shutdown\r" }
+	expect "config-if" { send "ip default-gateway $switch_gw\r" }
+	
+	expect "config" { send "ip access-list standard PERMIT_MANAGEMENT_ONLY\r" }
+	expect "config-std-nacl" { send "permit 10.0.4.0 0.0.1.255\r" }
+	expect "config-std-nacl" { send "permit 192.168.2.0 0.0.1.255\r" }
+	expect "config-std-nacl" { send "ip access-list standard 1\r" }
+	expect "config-std-nacl" { send "permit 10.0.4.0 0.0.1.255\r" }
+
+	expect "config-std-nacl" { send "snmp-server community NPFQMLxnxNL RO 1\r" }
+	expect "config" { send "snmp-server host $snmp_trap_receiver traps version 2c NPFQMLxnxNL\r" }
+	expect "config" { send "snmp-server ifindex persist\r" }
+	expect "config" { send "snmp-server location $switch_name\r" }
+	
+	expect "config" { send "snmp-server enable traps envmon\r" }
+	expect "config" { send "snmp-server enable traps mac-notification\r" }
+	expect "config" { send "snmp-server enable traps port-security\r" }
+	expect "config" { send "snmp-server enable traps snmp\r" }
+	expect "config" { send "snmp-server enable traps syslog\r" }
+
+	
+	expect "config" { send "logging $syslog_server\r" }
+	expect "config" { send "logging buffered 8192 debugging\r" } 
+
+	expect "config" { send "ntp server $ntp_server prefer\r" }
+	expect "config" { send "ntp server $ntp_server source Vlan193\r" }
+	
+	expect "config" { send "ip dhcp snooping vlan 2 1000\r" }
+	expect "config" { send "no ip dhcp snooping information option\r" }
+	expect "config" { send "ip dhcp snooping\r" }
+
+		
+	expect "config" { send "line vty 0 15\r" }
+	expect "config-line" { send "access-class PERMIT_MANAGEMENT_ONLY in\r" }
+
+	expect "config-line" { send "end\r" }
+
+	set timeout 25	
+	expect "#" { send "wr mem\r" }
+	expect "#" { send "exit\r" }
+	expect ">" { send "exit\r" }
+}
+
+exit 0

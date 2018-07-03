@@ -1,0 +1,71 @@
+#!/usr/bin/expect
+
+set switch_ip [lindex $argv 1]
+set switch_name [lindex $argv 0]
+set switch_subnet [lindex $argv 2]
+set switch_gw [lindex $argv 3]
+set switch_vlan [lindex $argv 4]
+
+set password "password\r"
+
+#spawn telnet $ip
+spawn screen -r
+
+set count 5;
+
+while {$count > 0} {
+	send "\r"
+	sleep 1
+	set count [expr $count-1]
+}
+
+expect "*uad 9600" {
+	timeout { send "\r\r" }
+}
+
+expect "*ress any key to continue" {
+	send "\r"
+}
+
+
+expect "*Password:" {
+	send "admin\r"
+}
+
+expect "*Password:" {
+	send "$password\r"
+}
+
+expect "*#" {
+	send "config\r"
+	expect "config" {
+		expect "config" { send "password all\r" }
+
+		expect "*Operator" { send "$password\r" }
+		expect "*Operator" { send "$password\r" }
+		expect "*Manager"  { send "$password\r" }
+		expect "*Manager"  { send "$password\r" }
+
+		expect "config" { send "crypto key generate ssh rsa\r" }
+		
+
+		expect "config" { send "hostname \"$switch_name\"\r" }
+		expect "config" { send "ip ssh\r" }
+		expect "config" { send "ip ssh timeout 100\r" }
+		expect "config" { send "ip ssh version 2\r" }
+
+		expect "config" { send "vlan 1\r" }
+		expect "vlan-1" { send "no dhcp-snooping\r" }
+		expect "vlan-1" { send "ip address $switch_ip $switch_subnet\r" }
+		expect "vlan-1" { send "exit\r" }
+
+		expect "config" { send "spanning-tree force-version stp-compatible\r" }
+		expect "config" { send "no web-management\r" }
+		expect "config" { send "no telnet-server\r" } 
+		expect "config" { send "write memory\r" }
+		expect "config" { send "logout\r" }
+		expect "*Do you want to" { send "y\r" }
+	}
+}
+
+exit 0

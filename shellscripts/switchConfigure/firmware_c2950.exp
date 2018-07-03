@@ -1,0 +1,123 @@
+#!/usr/bin/expect
+
+#exp_internal 1
+
+set switch_ip [lindex $argv 1]
+set switch_name [lindex $argv 0]
+set switch_gw [lindex $argv 2]
+set switch_vlan [lindex $argv 3]
+
+set cios_image "c2950.bin"
+set cios_size 3722814
+
+set password "password\r"
+
+#spawn telnet $ip
+spawn screen -r
+
+send "\r"
+sleep 1
+send "\r"
+sleep 1
+send "\r"
+expect "Would you like to enter the initial configuration dialog?" {
+	send "no\r"
+}
+
+send "\r"
+sleep 1
+send "\r"
+
+set timeout 10
+
+expect ">" {
+	send "show version | include Version\r"
+	expect -re {Version ([^,]+),}
+	if {$expect_out(1,string) == "12.1(22)EA14" } {
+		expect ">" {send "exit\r"}
+		close
+		send_user "\r\nSwitch is already running newest version (12.1(22)EA14)\r\n"
+		exit 0
+	} else {
+		send_user "\r\nSwitch is running versions ($expect_out(1,string)) going to update\r\n"
+	}
+}
+
+expect ">" {
+  set timeout 7
+  send "enable\r"
+  expect "#" { send "write erase\r"
+	expect "confirm" { send "\r" }  }
+  
+  expect "#" { send "reload\r"
+	expect "Save?" { send "no\r" }
+	expect "confirm" { send "\r" }
+	}
+  
+  
+  
+  set timeout 80
+  
+  expect "Would you like to enter the initial configuration dialog?" {
+	sleep 1
+	send "no\r"
+	expect "Press RETURN to get started!" { send "\r" }
+	set timeout 10
+	expect ">" {
+		send "enable\r"
+		expect "#" { send "conf t\r" }
+		expect "config" { send "int vlan 1\r" }
+		expect "config-if" { send "ip address 192.168.70.2 255.255.255.0\r" }
+		expect "config-if" { send "no shutdown\r" }
+		expect "config-if" { send "exit\r" }
+		expect "config" { send "exit\r" }
+		
+		expect "#" {
+			send "delete /force /recursive flash:html\r"
+			set timeout 3
+			while 1 {
+			  send "\r"
+			  expect "#" { break }
+			}
+			set timeout 180
+			expect "#" { send "show flash\r" }
+			expect -re {(\d+) bytes free}
+			
+			#set diff_size "[expr  ]"
+			
+			sleep 15
+			
+			if {$expect_out(1,string) > $cios_size} {
+				expect "#" {
+					send "copy tftp: flash:\r"
+					expect "Address or name of remote host" { send "192.168.70.1\r" }
+					expect "Source filename" { send "$cios_image\r" }
+					expect "Destination filename" { send "\r" }
+					set timeout 120
+					expect {
+						"Error" { close
+						send_user "Error occurred - do you have a tftpd server running on 192.168.70.1?\r"
+							exit 1}
+					}
+					expect "#" { send "enable\r" }
+					expect "#" { send "conf t\r" }
+					expect "config" { send "no boot system\r" }
+					expect "config" { send "boot system flash:$cios_image\r" }
+					expect "config" { send "exit\r" }
+					expect "#" 		{ send "reload\r" }
+					expect "Save?" { send "yes\r" }
+					expect "confirm" { send "\r" }
+					set timeout 80
+					expect "Would you like to enter the initial configuration dialog?" { source "cisco2950.exp" }
+				}
+			} else {
+				close
+				send_user "No room for CIOS Image!"
+				exit 1
+			}
+		}
+	}
+}
+}
+
+exit 0

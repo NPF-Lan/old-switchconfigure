@@ -1,0 +1,55 @@
+#!/usr/bin/expect
+
+#exp_internal 1
+
+set switch_ip [lindex $argv 1]
+set switch_name [lindex $argv 0]
+set switch_gw [lindex $argv 2]
+set switch_vlan [lindex $argv 3]
+
+set cios_image "c2950.bin"
+set cios_size 3722814
+
+set password "password\r"
+
+#spawn telnet $ip
+spawn screen -r
+
+send "\r"
+sleep 1
+send "\r"
+sleep 1
+send "\r"
+expect "Would you like to enter the initial configuration dialog?" {
+	send "no\r"
+}
+
+send "\r"
+sleep 1
+send "\r"
+
+set timeout 10
+
+expect ">" {
+  set timeout 7
+  send "enable\r"
+  expect "Password:" { send "$password\r" }
+#Delete vlan.dat
+  expect "#" { send "delete /force flash:vlan.dat\r"
+  	expect "Delete filename" { send "y\r" }
+  }
+
+#Write erase
+  expect "#" { send "write erase\r"
+	expect "confirm" { send "\r" }  }
+
+#Reload
+  expect "#" { send "reload\r"
+	expect "Save?" { send "no\r" }
+	expect "confirm" { send "\r" }
+	}
+  
+  
+}
+
+exit 0
